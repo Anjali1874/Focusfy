@@ -15,8 +15,9 @@ export function Toaster() {
 	return (
 		<ToastProvider>
 			{toasts.map(({ id, title, description, action, ...props }) => {
-				return (
-					<Toast key={id} {...props}>
+					const safeProps = Object.fromEntries(Object.entries(props).filter(([k, v]) => typeof v !== 'function'));
+					return (
+						<Toast key={id} {...safeProps}>
 						<div className="grid gap-1">
 							{title && <ToastTitle>{title}</ToastTitle>}
 							{description && (

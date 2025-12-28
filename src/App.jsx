@@ -76,31 +76,51 @@ function App() {
     return <FlashScreen />;
   }
 
-  // If not authenticated, show AuthPage regardless of routing
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-slate-950">
-        <AuthPage onLogin={handleLogin} />
-      </div>
-    );
-  }
-
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-slate-950 text-white flex">
-        <Sidebar currentPage={currentPage} setCurrentPage={setCurrentPage} userData={userData} onLogout={handleLogout} />
-        <main className="flex-1 transition-all duration-300">
-          <Routes>
-            <Route path="/" element={<Dashboard userData={userData} />} />
-            <Route path="/focus" element={<FocusSession userData={userData} />} />
-            <Route path="/todo" element={<TodoMaker userData={userData} />} />
-            <Route path="/leaderboard" element={<Leaderboard userData={userData} />} />
-            <Route path="/profile" element={<Profile userData={userData} onLogout={handleLogout} />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </main>
-        <Toaster />
-      </div>
+      {isLoading ? (
+        <FlashScreen />
+      ) : (
+        <div className="min-h-screen bg-slate-950 text-white flex">
+          {isAuthenticated && (
+            <Sidebar currentPage={currentPage} setCurrentPage={setCurrentPage} userData={userData} onLogout={handleLogout} />
+          )}
+          <main className="flex-1 transition-all duration-300">
+            <Routes>
+              <Route
+                path="/login"
+                element={<AuthPage onLogin={(user) => { handleLogin(user); window.location.replace('/'); }} initialIsLogin={true} />}
+              />
+              <Route
+                path="/signup"
+                element={<AuthPage onLogin={(user) => { handleLogin(user); window.location.replace('/'); }} initialIsLogin={false} />}
+              />
+              <Route
+                path="/"
+                element={isAuthenticated ? <Dashboard userData={userData} /> : <Navigate to="/login" replace />}
+              />
+              <Route
+                path="/focus"
+                element={isAuthenticated ? <FocusSession userData={userData} /> : <Navigate to="/login" replace />}
+              />
+              <Route
+                path="/todo"
+                element={isAuthenticated ? <TodoMaker userData={userData} /> : <Navigate to="/login" replace />}
+              />
+              <Route
+                path="/leaderboard"
+                element={isAuthenticated ? <Leaderboard userData={userData} /> : <Navigate to="/login" replace />}
+              />
+              <Route
+                path="/profile"
+                element={isAuthenticated ? <Profile userData={userData} onLogout={handleLogout} /> : <Navigate to="/login" replace />}
+              />
+              <Route path="*" element={<Navigate to={isAuthenticated ? '/' : '/login'} replace />} />
+            </Routes>
+          </main>
+          <Toaster />
+        </div>
+      )}
     </BrowserRouter>
   );
 }

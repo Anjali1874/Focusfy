@@ -6,52 +6,54 @@ import { Input } from './ui/input';
 import { Label } from './ui/display';
 import { toast } from './ui/use-toast';
 
-const AuthPage = ({ onLogin }) => {
-  const [isLogin, setIsLogin] = useState(true);
+const AuthPage = ({ onLogin, initialIsLogin = true }) => {
+  const [isLogin, setIsLogin] = useState(initialIsLogin);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: ''
   });
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!isLogin && !formData.name) {
-      toast({
-        title: "Name Required",
-        description: "Please enter your name to sign up.",
-        variant: "destructive"
-      });
+      toast({ title: 'Name Required', description: 'Please enter your name to sign up.', variant: 'destructive' });
       return;
     }
 
     if (!formData.email || !formData.password) {
-      toast({
-        title: "Missing Information",
-        description: "Please fill in all fields.",
-        variant: "destructive"
-      });
+      toast({ title: 'Missing Information', description: 'Please fill in all fields.', variant: 'destructive' });
       return;
     }
 
-    const user = {
-      id: Date.now().toString(),
-      name: formData.name || formData.email.split('@')[0],
-      email: formData.email,
-      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${formData.email}`,
-      totalFocusTime: 0,
-      totalSessions: 0,
-      streak: 0,
-      level: 1,
-      joinedDate: new Date().toISOString()
-    };
+    try {
+      const base = import.meta.env.VITE_CORE_URL || '';
+      const url = base + (isLogin ? '/auth/login' : '/auth/signup');
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: formData.name, email: formData.email, password: formData.password }),
+      });
+      const body = await res.json();
+      console.log('Auth response', body);
+      if (!res.ok) {
+        toast({ title: 'Authentication Failed', description: body.error || body.detail || 'Check your credentials', variant: 'destructive' });
+        return;
+      }
 
-    onLogin(user);
-    toast({
-      title: isLogin ? "Welcome Back! 🎉" : "Account Created! 🎉",
-      description: isLogin ? "Let's boost your productivity!" : "Welcome to FocusFy!"
-    });
+      const token = body.token;
+      const user = body.user;
+      const userWithToken = { ...user, token, avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}` };
+
+      // call parent handler
+      onLogin(userWithToken);
+
+      toast({ title: isLogin ? 'Welcome Back! 🎉' : 'Account Created! 🎉', description: isLogin ? "Let's boost your productivity!" : 'Welcome to FocusFy!' });
+    } catch (err) {
+      console.error('Auth error', err);
+      toast({ title: 'Network Error', description: 'Failed to contact auth service', variant: 'destructive' });
+    }
   };
 
   return (

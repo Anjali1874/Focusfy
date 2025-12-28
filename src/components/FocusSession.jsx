@@ -15,6 +15,9 @@ const FocusSession = ({ userData }) => {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const intervalRef = useRef(null);
+  const captureRef = useRef(null);
+  const captureIntervalRef = useRef(null);
+  const sessionIdRef = useRef(null);
 
   useEffect(() => {
     if (isActive && !isPaused) {
@@ -41,6 +44,90 @@ const FocusSession = ({ userData }) => {
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+      }
+    };
+  }, [isActive, isPaused, cameraActive]);
+
+  // Capture frames and send to backend analyze endpoint periodically
+  useEffect(() => {
+    const shouldCapture = isActive && !isPaused && cameraActive && videoRef.current;
+    const CAPTURE_INTERVAL_MS = 1500;
+
+    const computeFocusScore = (metrics) => {
+      if (!metrics) return 0;
+      let score = 100;
+      const conf = metrics.confidence ?? 0.5;
+      if (metrics.gaze_direction && metrics.gaze_direction !== 'center') score -= 30;
+      // blink_rate is a heuristic; more blinks reduce score
+      score -= Math.min(30, (metrics.blink_rate || 0) * 5);
+      score = Math.max(0, Math.min(100, Math.round(score * conf)));
+      return score;
+    };
+
+    const captureOnce = async () => {
+      try {
+        const video = videoRef.current;
+        if (!video || video.readyState < 2) return;
+
+        const w = video.videoWidth || 320;
+        const h = video.videoHeight || 240;
+        let canvas = captureRef.current;
+        if (!canvas) {
+          canvas = document.createElement('canvas');
+          captureRef.current = canvas;
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, w, h);
+
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+        if (!blob) return;
+
+        const form = new FormData();
+        form.append('image', blob, 'frame.jpg');
+
+        const token = userData?.token || (JSON.parse(localStorage.getItem('focusUser') || '{}').token);
+        const res = await fetch((process.env.REACT_APP_CORE_URL || '') + '/analyze', {
+          method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: form,
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const metrics = data.metrics || data?.metrics;
+        const score = computeFocusScore(metrics);
+        setFocusScore(score);
+
+        // send to session store (fire-and-forget)
+        try {
+          const sid = sessionIdRef.current;
+          if (sid) {
+            fetch((process.env.REACT_APP_CORE_URL || '') + `/sessions/${sid}/metrics`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': token ? `Bearer ${token}` : '' },
+              body: JSON.stringify({ ts: Date.now(), score, metrics }),
+            }).catch(() => {});
+          }
+        } catch (e) {
+          // ignore
+        }
+      } catch (err) {
+        // silent fail; keep UI unchanged
+        console.error('Frame analyze failed', err);
+      }
+    };
+
+    if (shouldCapture) {
+      // run immediately then on interval
+      captureOnce();
+      captureIntervalRef.current = setInterval(captureOnce, CAPTURE_INTERVAL_MS);
+    }
+
+    return () => {
+      if (captureIntervalRef.current) {
+        clearInterval(captureIntervalRef.current);
+        captureIntervalRef.current = null;
       }
     };
   }, [isActive, isPaused, cameraActive]);
@@ -98,6 +185,23 @@ const FocusSession = ({ userData }) => {
       title: "Session Started! 🎯",
       description: "Stay focused and productive!"
     });
+
+    // create server-side session (non-blocking)
+    (async () => {
+      try {
+        const token = userData?.token || (JSON.parse(localStorage.getItem('focusUser') || '{}').token);
+        const res = await fetch((process.env.REACT_APP_CORE_URL || '') + '/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ duration }),
+        });
+        if (!res.ok) return;
+        const j = await res.json();
+        sessionIdRef.current = j.sessionId;
+      } catch (e) {
+        console.error('Create session failed', e);
+      }
+    })();
   };
 
   const handlePauseSession = () => {
@@ -112,9 +216,9 @@ const FocusSession = ({ userData }) => {
     setIsActive(false);
     setIsPaused(false);
     stopCamera();
-    
+
     const sessionTime = (duration * 60 - timeLeft) / 60;
-    
+
     // Safety check for localStorage operations
     try {
         const storedStats = localStorage.getItem(`stats_${userData.id}`);
@@ -137,7 +241,65 @@ const FocusSession = ({ userData }) => {
       description: `Great work! You focused for ${Math.floor(sessionTime)} minutes`
     });
 
-    setTimeLeft(duration * 60);
+    // fetch session metrics and open a simple chart in a new window
+    (async () => {
+      try {
+        const sid = sessionIdRef.current;
+        if (!sid) {
+          setTimeLeft(duration * 60);
+          return;
+        }
+        const res = await fetch((process.env.
+          CORE_URL || '') + `/sessions/${sid}/metrics`);
+        if (!res.ok) {
+          setTimeLeft(duration * 60);
+          return;
+        }
+        const j = await res.json();
+        const samples = j.metrics || [];
+
+        // prepare chart HTML
+        const labels = samples.map(s => new Date(s.ts).toLocaleTimeString());
+        const dataPoints = samples.map(s => s.score || 0);
+        const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Session Focus Chart</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head><body>
+<div style="width:900px;height:500px;margin:32px;">
+<canvas id="chart"></canvas>
+</div>
+<script>
+const ctx = document.getElementById('chart').getContext('2d');
+new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: ${JSON.stringify(labels)},
+    datasets: [{
+      label: 'Focus Score',
+      data: ${JSON.stringify(dataPoints)},
+      borderColor: 'rgba(99,102,241,1)',
+      backgroundColor: 'rgba(99,102,241,0.15)',
+      tension: 0.3,
+      fill: true,
+    }]
+  },
+  options: { scales: { y: { min: 0, max: 100 } } }
+});
+</script>
+</body></html>`;
+
+        const w = window.open('', '_blank');
+        if (w) {
+          w.document.open();
+          w.document.write(html);
+          w.document.close();
+        }
+      } catch (e) {
+        console.error('Fetch session metrics failed', e);
+      } finally {
+        setTimeLeft(duration * 60);
+      }
+    })();
   };
 
   const formatTime = (seconds) => {
