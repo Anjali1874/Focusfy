@@ -13,7 +13,8 @@ This README helps contributors run the project locally, understand the structure
 ## Architecture
 Below is a simple architecture diagram showing how the frontend communicates with backend services (put the file at `docs/architecture.png` so it renders here):
 
-![Architecture](docs/architecture.png)
+<img width="672" height="268" alt="image" src="https://github.com/user-attachments/assets/148dd822-88e5-429d-9ea8-d2f532ec2be2" />
+
 
 ## Prerequisites
 - Node.js 18+ recommended
