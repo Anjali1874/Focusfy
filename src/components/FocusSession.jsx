@@ -15,7 +15,7 @@ const FocusSession = ({ userData }) => {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const intervalRef = useRef(null);
-  const captureRef = useRef(null);
+  const captureRef = useRef(null);    
   const captureIntervalRef = useRef(null);
   const sessionIdRef = useRef(null);
 
